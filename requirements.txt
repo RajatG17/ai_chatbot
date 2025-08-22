@@ -1,0 +1,8 @@
+django
+djangorestframework 
+requests
+ollama
+channels
+channels-redis
+httpx
+websockets
