@@ -7,6 +7,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/chat"
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         await self.accept()  # accept incoming connection
+        # await self.send(text_data=json.dumps({"message": "Connected to Django WS"}))
 
     async def disconnect(self, close_code):
         pass  # optional cleanup
@@ -40,9 +41,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         }
 
         # async HTTP streaming via httpx
+        response_text = ""
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", OLLAMA_API_URL, json=payload) as response:
                 async for line in response.aiter_lines():
-                    if line:
-                        # forward each line to frontend
-                        await self.send(text_data=line)
+                     if line.strip():
+                        try:
+                            data = json.loads(line)
+                            if "message" in data:
+                                content = data["message"]["content"]
+                                await self.send(text_data=json.dumps({"message": content}))
+                        except Exception:
+                            pass
+        # send a final message to indicate completion
+        await self.send(text_data=json.dumps({"done": True}))
