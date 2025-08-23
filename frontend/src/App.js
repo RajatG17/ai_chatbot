@@ -6,90 +6,154 @@ function App(){
   const ws = useRef(null);
   const messageEndRef = useRef(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const endRef = useRef(null);
+
 
   useEffect(() => {
-    ws.current = new WebSocket("ws://127.0.0.1:8000/ws/chat/");
+    const socket = new WebSocket("ws://127.0.0.1:8000/ws/chat/");
+    ws.current = socket;
 
-    ws.current.onmessage = (event) => {
-      try{
-        const data = JSON.parse(event.data);
+    socket.onopen = () => setConnected(true);
 
-        if (data.done){
-          setIsTyping(false);
-        }
+    socket.onclose = () => {
+      setConnected(false);
+      setIsTyping(false);
+    }
 
-        setIsTyping(true);
-        setMessages((prev) => {
-          const lastMessage = prev[prev.length - 1];
-      
-          if (lastMessage && lastMessage.sender === "AI") {
-            // Append new chunk to the last AI message
-            return [
-              ...prev.slice(0, -1),
-              { sender: "AI", text: lastMessage.text + data.message }
-            ];
-          } else {
-            // Start a new AI message if none exists
-            return [...prev, { sender: "AI", text: data.message }];
-          }
-        });
-
-      }catch(error){
-        console.error("Invalid JSON:", event.data);
-      }
-
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+      setConnected(false);
     };
 
-    ws.current.onclose = () => console.log("WebSocket closed");
-    ws.current.onerror = (error) => console.error("Websocket error:", error);
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
 
-    return (() => ws.current.close())
+        if (data.error) {
+          setMessages((prev) => [...prev, { sender: "System", text: `Error: ${data.error}` }]);
+          setIsTyping(false);
+          return;
+        }
 
+        if (data.done) {
+          setIsTyping(false);
+          return;
+        }
+
+        if (typeof data.message === "string") {
+          setIsTyping(true);
+
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.sender === "AI") {
+              // append chunk to last AI message
+              return [...prev.slice(0, -1), { sender: "AI", text: last.text + data.message }];
+            } else {
+              // start new AI message
+              return [...prev, { sender: "AI", text: data.message }];
+            }
+          });
+        }
+      } catch (e) {
+        console.error("Invalid JSON from server:", event.data);
+      }
+    };
+
+    // cleanup on unmount
+    return () => {
+      try { socket.close(); } catch {}
+    };
   }, []);
 
+  // --- Auto scroll when messages or typing state changes ---
   useEffect(() => {
-    messageEndRef.current?.scrollIntoView({behavior: "smooth"});
-  }, [messages]);
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
 
   const sendMessage = () => {
-    if (input.trim() !== "") {
-      ws.current.send(JSON.stringify({ message: input }));
-  
-      setMessages((prev) => [...prev, { sender: "User", text: input }]);
-      setInput("");
-    }
+    const text = input.trim();
+    if (!text || !ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+
+    // show user message immediately
+    setMessages((prev) => [...prev, { sender: "User", text }]);
+    setInput("");
+
+    // send JSON to backend
+    ws.current.send(JSON.stringify({ message: text }));
   };
 
-  const handleKeyPress = (e) => {
+  const onKeyDown = (e) => {
     if (e.key === "Enter") sendMessage();
   };
 
+  // --- Simple styles ---
+  const wrap = { maxWidth: 720, margin: "40px auto", fontFamily: "system-ui, sans-serif" };
+  const chatBox = { border: "1px solid #ddd", borderRadius: 8, padding: 12, height: 480, overflowY: "auto", background: "#fafafa" };
+  const row = (sender) => ({
+    display: "flex",
+    justifyContent: sender === "User" ? "flex-end" : "flex-start",
+    margin: "6px 0"
+  });
+  const bubble = (sender) => ({
+    maxWidth: "80%",
+    padding: "8px 12px",
+    borderRadius: 14,
+    lineHeight: 1.35,
+    whiteSpace: "pre-wrap",
+    background: sender === "User" ? "#dbeafe" : sender === "AI" ? "#e5e7eb" : "#fee2e2"
+  });
+
   return (
-    <div style={{ maxWidth: "600px", margin: "50px auto", fontFamily: "sans-serif"}}>
-      <h2 style={{ textAlign: "center" }}>AI Assistant </h2>
-      <div style = {{border: "1px solid #ccc", padding: "10px", height: "400px", overflowY: "scroll" }}>
-        {messages.map((msg, idx) => (
-          <div key={idx} style={{ margin: "5px 0", textAlign: msg.sender === "User" ? "right" : "left"}}>
-            <b>{msg.sender}:</b> {msg.text}
+    <div style={wrap}>
+      <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        AI Chat Assistant
+        <span
+          title={connected ? "Connected" : "Disconnected"}
+          style={{
+            width: 10, height: 10, borderRadius: "50%",
+            background: connected ? "#22c55e" : "#ef4444", display: "inline-block"
+          }}
+        />
+      </h2>
+
+      <div style={chatBox}>
+        {messages.map((m, i) => (
+          <div key={i} style={row(m.sender)}>
+            <div style={bubble(m.sender)}><b>{m.sender}:</b> {m.text}</div>
           </div>
         ))}
+
         {isTyping && (
-            <div style={{ fontStyle: "italic", color: "gray", margin: "5px 0" }}>
-              AI is typing...
+          <div style={row("AI")}>
+            <div style={bubble("AI")} aria-live="polite" aria-label="AI is typing">
+              <b>AI:</b> <span style={{ opacity: 0.7 }}>typing…</span>
             </div>
-          )}
-        <div ref={messageEndRef} />
+          </div>
+        )}
+
+        <div ref={endRef} />
       </div>
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={handleKeyPress}
-        style={{ width: "80%", padding: "10px", margintop: "10px" }} 
-      />
-      < button onClick={sendMessage} style={{ width: "18%", marginLeft: "2%", padding: "10px"}}>
-      Send
-      </button>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={connected ? "Type a message…" : "Connecting…"}
+          style={{ flex: 1, padding: "12px 14px", borderRadius: 10, border: "1px solid #ddd" }}
+        />
+        <button
+          onClick={sendMessage}
+          disabled={!connected || !input.trim()}
+          style={{
+            padding: "12px 16px", borderRadius: 10, border: "1px solid #ddd",
+            background: connected ? "#111827" : "#9ca3af", color: "white", cursor: connected ? "pointer" : "not-allowed"
+          }}
+        >
+          Send
+        </button>
+      </div>
     </div>
   );
 }

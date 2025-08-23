@@ -6,6 +6,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/chat"
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        self.history = []
         await self.accept()  # accept incoming connection
         # await self.send(text_data=json.dumps({"message": "Connected to Django WS"}))
 
@@ -34,9 +35,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({"error": "No message provided"}))
             return
 
+        self.history.append({"role": "user", "content": user_message})
+
         payload = {
             "model": "gemma3:12b",
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": self.history,
             "stream": True
         }
 
@@ -50,8 +53,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
                             data = json.loads(line)
                             if "message" in data:
                                 content = data["message"]["content"]
+                                response_text += content
                                 await self.send(text_data=json.dumps({"message": content}))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print("Stream parser error:", e)
+
+        if response_text.strip():
+            self.history.append({"role": "assistant", "content": response_text})
         # send a final message to indicate completion
         await self.send(text_data=json.dumps({"done": True}))
