@@ -46,7 +46,9 @@ daphne -p 8000 backend.asgi:application
 ### 3. AI bacikend (Ollama)
 #### Install Ollama
 #### Pull Model
+```
 ollama pull gemma3:12b
+```
 #### verify API
 Ollama exposes an API at http://localhost:11434
 ```
